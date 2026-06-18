@@ -31,9 +31,25 @@ LOGOS_TEST(eligibilityProofHexFromPrepareJson_ok) {
     LOGOS_ASSERT_EQ(std::string(out), std::string("abcd"));
 }
 
+LOGOS_TEST(eligibilityProofHexFromPrepareJson_flat_ps_shape) {
+    char out[128] = {};
+    const int code = delivery_eligibility::eligibilityProofHexFromPrepareJson(
+        R"({"status":"ok","bytes_hex":"ef01","kind":"stream_proof"})", out, sizeof(out));
+    LOGOS_ASSERT_EQ(code, 0);
+    LOGOS_ASSERT_EQ(std::string(out), std::string("ef01"));
+}
+
 LOGOS_TEST(pluginMethodsInclude_finds_method) {
     LOGOS_ASSERT_TRUE(delivery_eligibility::pluginMethodsInclude(
         R"(["foo","verifyEligibilityForStoreQuery"])", "verifyEligibilityForStoreQuery"));
     LOGOS_ASSERT_FALSE(delivery_eligibility::pluginMethodsInclude(
         R"(["foo"])", "verifyEligibilityForStoreQuery"));
+}
+
+LOGOS_TEST(pluginMethodsInclude_finds_method_in_object_array) {
+    LOGOS_ASSERT_TRUE(delivery_eligibility::pluginMethodsInclude(
+        R"([{"name":"prepareEligibilityForStoreQuery"},{"name":"verifyEligibilityForStoreQuery"}])",
+        "verifyEligibilityForStoreQuery"));
+    LOGOS_ASSERT_FALSE(delivery_eligibility::pluginMethodsInclude(
+        R"([{"name":"prepareEligibilityForStoreQuery"}])", "verifyEligibilityForStoreQuery"));
 }

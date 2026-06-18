@@ -113,7 +113,7 @@ int eligibilityProofHexFromPrepareJson(const char* json, char* outProofHex, size
 
     nlohmann::json result = obj.value("result", nlohmann::json::object());
     if (!result.is_object()) {
-        return kStatusInternalError;
+        result = obj;
     }
 
     std::string bytesHex;
@@ -121,6 +121,10 @@ int eligibilityProofHexFromPrepareJson(const char* json, char* outProofHex, size
         bytesHex = result["bytes_hex"].get<std::string>();
     } else if (result.contains("bytesHex") && result["bytesHex"].is_string()) {
         bytesHex = result["bytesHex"].get<std::string>();
+    } else if (obj.contains("bytes_hex") && obj["bytes_hex"].is_string()) {
+        bytesHex = obj["bytes_hex"].get<std::string>();
+    } else if (obj.contains("bytesHex") && obj["bytesHex"].is_string()) {
+        bytesHex = obj["bytesHex"].get<std::string>();
     } else {
         return kStatusInternalError;
     }
@@ -148,6 +152,10 @@ bool pluginMethodsInclude(const char* methodsJson, const char* methodName)
 
     for (const auto& entry : arr) {
         if (entry.is_string() && entry.get<std::string>() == methodName) {
+            return true;
+        }
+        if (entry.is_object() && entry.contains("name") && entry["name"].is_string()
+            && entry["name"].get<std::string>() == methodName) {
             return true;
         }
     }
