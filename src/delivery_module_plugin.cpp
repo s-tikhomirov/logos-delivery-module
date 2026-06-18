@@ -1,4 +1,5 @@
 #include "delivery_module_plugin.h"
+#include "delivery_eligibility.h"
 #include <cstdio>
 #include <ctime>
 #include <memory>
@@ -6,6 +7,18 @@
 #include <optional>
 #include <semaphore>
 #include <unordered_map>
+
+#include <QString>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QMetaType>
+#include <logos_api.h>
+#include <logos_api_client.h>
+#if __has_include("generated_code/logos_sdk.h")
+#include "generated_code/logos_sdk.h"
+#else
+#include "logos_sdk.h"
+#endif
 
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
@@ -66,6 +79,7 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
+    clearEligibilityHooksAtFfi();
     if (deliveryCtx) {
         logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
         deliveryCtx = nullptr;
@@ -390,6 +404,272 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 
     fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
+}
+
+LogosAPI* DeliveryModuleImpl::logosApiOrNull() const
+{
+    if (!isContextReady()) {
+        return nullptr;
+    }
+    return modules().api;
+}
+
+StdLogosResult DeliveryModuleImpl::validateTargetModule(
+    const std::string& moduleName,
+    const char* requiredMethod)
+{
+    LogosAPI* api = logosApiOrNull();
+    if (api == nullptr) {
+        return {false, {}, "LogosAPI not available"};
+    }
+
+    LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
+    if (client == nullptr || !client->isConnected()) {
+        return {false, {}, "Module not connected: " + moduleName};
+    }
+
+    const QVariant result = client->invokeRemoteMethod(
+        QString::fromStdString(moduleName),
+        QStringLiteral("getPluginMethods"));
+
+    std::string methodsJson;
+    if (result.canConvert<QJsonArray>()) {
+        const QJsonDocument doc(result.toJsonArray());
+        methodsJson = doc.toJson(QJsonDocument::Compact).toStdString();
+    } else if (result.typeId() == QMetaType::QString) {
+        methodsJson = result.toString().toStdString();
+    } else {
+        return {false, {}, "getPluginMethods returned unexpected type for: " + moduleName};
+    }
+
+    if (!delivery_eligibility::pluginMethodsInclude(methodsJson.c_str(), requiredMethod)) {
+        return {false, {},
+                std::string("Module missing required method: ") + requiredMethod};
+    }
+
+    return {true, {}};
+}
+
+void DeliveryModuleImpl::applyVerifierHookRegistration(bool enable)
+{
+    if (deliveryCtx == nullptr) {
+        return;
+    }
+    if (enable) {
+        if (!verifierHookAtFfi) {
+            logosdelivery_set_eligibility_verifier(
+                deliveryCtx, eligibilityVerifierTrampoline, this);
+            verifierHookAtFfi = true;
+        }
+    } else {
+        if (verifierHookAtFfi) {
+            logosdelivery_set_eligibility_verifier(deliveryCtx, nullptr, nullptr);
+            verifierHookAtFfi = false;
+        }
+        verifierModuleName.clear();
+    }
+}
+
+void DeliveryModuleImpl::applyProviderHookRegistration(bool enable)
+{
+    if (deliveryCtx == nullptr) {
+        return;
+    }
+    if (enable) {
+        if (!providerHookAtFfi) {
+            logosdelivery_set_eligibility_provider(
+                deliveryCtx, eligibilityProviderTrampoline, this);
+            providerHookAtFfi = true;
+        }
+    } else {
+        if (providerHookAtFfi) {
+            logosdelivery_set_eligibility_provider(deliveryCtx, nullptr, nullptr);
+            providerHookAtFfi = false;
+        }
+        providerModuleName.clear();
+    }
+}
+
+void DeliveryModuleImpl::clearEligibilityHooksAtFfi()
+{
+    std::lock_guard<std::mutex> lock(eligibilityMutex);
+    applyVerifierHookRegistration(false);
+    applyProviderHookRegistration(false);
+}
+
+int DeliveryModuleImpl::eligibilityVerifierTrampoline(
+    const char* proof_hex,
+    const char* canonical_hex,
+    const char* requester_peer_id,
+    char* out_desc,
+    size_t out_desc_len,
+    void* user_data)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(user_data);
+    if (impl == nullptr || canonical_hex == nullptr || requester_peer_id == nullptr) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    std::string moduleName;
+    LogosAPI* api = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(impl->eligibilityMutex);
+        moduleName = impl->verifierModuleName;
+    }
+    api = impl->logosApiOrNull();
+    if (api == nullptr || moduleName.empty()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
+    if (client == nullptr || !client->isConnected()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    const QString proofBytes = (proof_hex != nullptr) ? QString::fromUtf8(proof_hex) : QString();
+    const QVariant result = client->invokeRemoteMethod(
+        QString::fromStdString(moduleName),
+        QStringLiteral("verifyEligibilityForStoreQuery"),
+        proofBytes,
+        QString::fromUtf8(canonical_hex),
+        QString::fromUtf8(requester_peer_id));
+
+    if (!result.isValid() || result.typeId() != QMetaType::QString) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    const std::string json = result.toString().toStdString();
+    return delivery_eligibility::eligibilityCodeFromVerifyJson(
+        json.c_str(), out_desc, out_desc_len);
+}
+
+int DeliveryModuleImpl::eligibilityProviderTrampoline(
+    const char* canonical_hex,
+    const char* provider_peer_id,
+    char* out_proof_hex,
+    size_t out_buf_len,
+    void* user_data)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(user_data);
+    if (impl == nullptr || canonical_hex == nullptr || provider_peer_id == nullptr) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    std::string moduleName;
+    {
+        std::lock_guard<std::mutex> lock(impl->eligibilityMutex);
+        moduleName = impl->providerModuleName;
+    }
+
+    LogosAPI* api = impl->logosApiOrNull();
+    if (api == nullptr || moduleName.empty()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
+    if (client == nullptr || !client->isConnected()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    const QVariant result = client->invokeRemoteMethod(
+        QString::fromStdString(moduleName),
+        QStringLiteral("prepareEligibilityForStoreQuery"),
+        QString::fromUtf8(canonical_hex),
+        QString::fromUtf8(provider_peer_id));
+
+    if (!result.isValid() || result.typeId() != QMetaType::QString) {
+        return delivery_eligibility::kStatusInternalError;
+    }
+
+    const std::string json = result.toString().toStdString();
+    return delivery_eligibility::eligibilityProofHexFromPrepareJson(
+        json.c_str(), out_proof_hex, out_buf_len);
+}
+
+void DeliveryModuleImpl::storeQuery_callback(
+    int callerRet,
+    const char* msg,
+    size_t len,
+    void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        return;
+    }
+    impl->storeQueryCompleted(
+        callerRet == RET_OK,
+        (msg && len > 0) ? std::string(msg, len) : std::string(),
+        currentTimestampNs());
+}
+
+StdLogosResult DeliveryModuleImpl::setEligibilityVerifier(const std::string& moduleName)
+{
+    std::lock_guard<std::mutex> lock(eligibilityMutex);
+
+    if (deliveryCtx == nullptr) {
+        return {false, {}, "Context not initialized"};
+    }
+
+    if (moduleName.empty()) {
+        applyVerifierHookRegistration(false);
+        return {true, {}};
+    }
+
+    const StdLogosResult validation = validateTargetModule(
+        moduleName, "verifyEligibilityForStoreQuery");
+    if (!validation.success) {
+        return validation;
+    }
+
+    verifierModuleName = moduleName;
+    applyVerifierHookRegistration(true);
+    return {true, {}};
+}
+
+StdLogosResult DeliveryModuleImpl::setEligibilityProvider(const std::string& moduleName)
+{
+    std::lock_guard<std::mutex> lock(eligibilityMutex);
+
+    if (deliveryCtx == nullptr) {
+        return {false, {}, "Context not initialized"};
+    }
+
+    if (moduleName.empty()) {
+        applyProviderHookRegistration(false);
+        return {true, {}};
+    }
+
+    const StdLogosResult validation = validateTargetModule(
+        moduleName, "prepareEligibilityForStoreQuery");
+    if (!validation.success) {
+        return validation;
+    }
+
+    providerModuleName = moduleName;
+    applyProviderHookRegistration(true);
+    return {true, {}};
+}
+
+StdLogosResult DeliveryModuleImpl::storeQuery(
+    const std::string& queryJson,
+    const std::string& providerAddr)
+{
+    fprintf(stderr, "DeliveryModuleImpl::storeQuery called\n");
+
+    if (!deliveryCtx) {
+        return {false, {}, "Context not initialized"};
+    }
+
+    if (logosdelivery_store_query(
+            deliveryCtx,
+            storeQuery_callback,
+            this,
+            queryJson.c_str(),
+            providerAddr.c_str())
+        != RET_OK) {
+        return {false, {}, "failed to initiate store query"};
+    }
+    return {true, {}};
 }
 
 std::string DeliveryModuleImpl::version() const {

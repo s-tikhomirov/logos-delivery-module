@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+class LogosAPI;
+
 #include <logos_module_context.h>
 #include <logos_result.h>
 
@@ -188,6 +190,30 @@ public:
      */
     std::string collectOpenMetricsText();
 
+    /**
+     * @brief Register the module that verifies inbound Store eligibility proofs.
+     *
+     * Empty @p moduleName clears a previous registration. Requires @ref createNode first.
+     * Validates @c verifyEligibilityForStoreQuery via @c getPluginMethods before commit.
+     */
+    StdLogosResult setEligibilityVerifier(const std::string& moduleName);
+
+    /**
+     * @brief Register the module that prepares outbound Store eligibility proofs.
+     *
+     * Empty @p moduleName clears a previous registration. Requires @ref createNode first.
+     * Validates @c prepareEligibilityForStoreQuery via @c getPluginMethods before commit.
+     */
+    StdLogosResult setEligibilityProvider(const std::string& moduleName);
+
+    /**
+     * @brief Issue an async Store query to @p providerAddr.
+     *
+     * @p queryJson follows logosdelivery_store_query camelCase shape. Completion is reported
+     * via @c storeQueryCompleted.
+     */
+    StdLogosResult storeQuery(const std::string& queryJson, const std::string& providerAddr);
+
     std::string name() const { return "delivery_module"; }
 
     std::string version() const;
@@ -201,11 +227,40 @@ logos_events:
 
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
+    void storeQueryCompleted(bool success, const std::string& responseJson, int64_t timestamp);
 
 private:
     void* deliveryCtx;
 
     std::mutex createNodeMutex;
+    std::mutex eligibilityMutex;
+    std::string verifierModuleName;
+    std::string providerModuleName;
+    bool verifierHookAtFfi = false;
+    bool providerHookAtFfi = false;
+
+    class LogosAPI* logosApiOrNull() const;
+    StdLogosResult validateTargetModule(const std::string& moduleName, const char* requiredMethod);
+    void clearEligibilityHooksAtFfi();
+    void applyVerifierHookRegistration(bool enable);
+    void applyProviderHookRegistration(bool enable);
+
+    static int eligibilityVerifierTrampoline(
+        const char* proof_hex,
+        const char* canonical_hex,
+        const char* requester_peer_id,
+        char* out_desc,
+        size_t out_desc_len,
+        void* user_data);
+
+    static int eligibilityProviderTrampoline(
+        const char* canonical_hex,
+        const char* provider_peer_id,
+        char* out_proof_hex,
+        size_t out_buf_len,
+        void* user_data);
+
+    static void storeQuery_callback(int callerRet, const char* msg, size_t len, void* userData);
 
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
 
