@@ -146,6 +146,32 @@ extern "C"
   // header liblogosdelivery_kernel.h. It is intentionally not declared here so
   // this header only promises the stable Messaging / Reliable Channels surface.
 
+typedef int (*EligibilityVerifierCb)(
+    const char* proof_hex,
+    const char* canonical_hex,
+    const char* requester_peer_id,
+    char* out_desc,
+    size_t out_desc_len,
+    void* user_data);
+
+typedef int (*EligibilityProviderCb)(
+    const char* canonical_hex,
+    const char* provider_peer_id,
+    char* out_proof_hex,
+    size_t out_buf_len,
+    void* user_data);
+
+int logosdelivery_set_eligibility_verifier(void* ctx, EligibilityVerifierCb cb, void* user_data);
+
+int logosdelivery_set_eligibility_provider(void* ctx, EligibilityProviderCb cb, void* user_data);
+
+int logosdelivery_store_query(
+    void* ctx,
+    logosdelivery_callback cb,
+    void* userData,
+    const char* queryJson,
+    const char* providerAddr);
+
 #ifdef __cplusplus
 }
 #endif

@@ -3824,16 +3824,17 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1785443689,
-        "narHash": "sha256-MHPA2HSHjK6xeo+a1GrDQK80IBMmBShv7W10jZmeykI=",
-        "ref": "refs/heads/master",
-        "rev": "f8b036594ea2a36b529e10b584b7d2851a3ac5c8",
-        "revCount": 2425,
+        "lastModified": 1786463763,
+        "narHash": "sha256-1ofK+8XBO45FtrHkvrQ29fhU4ZOLBI5fVm2Ta3tRQs0=",
+        "ref": "feat/payment-streams-store-eligibility",
+        "rev": "155957ad8d0d05acaca0811dd5f1739109eb04f3",
+        "revCount": 2402,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
+        "ref": "feat/payment-streams-store-eligibility",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"

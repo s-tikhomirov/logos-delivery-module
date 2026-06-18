@@ -9,15 +9,20 @@ logos_test(
     NAME delivery_module_tests
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
+        ../src/delivery_eligibility.cpp
         mocks/delivery_module_events_stub.cpp
     TEST_SOURCES
         main.cpp
         test_delivery_module.cpp
+        test_delivery_eligibility.cpp
+        test_delivery_eligibility_json.cpp
         test_approach_a_thread_probe.cpp
     MOCK_C_SOURCES
         mocks/mock_liblogosdelivery.cpp
     EXTRA_INCLUDES
         stubs/lib
+        stubs
+        mocks
 )
 
 # delivery_module uses C++20 features (std::binary_semaphore, pack init-capture).
@@ -38,12 +43,14 @@ if(LIBLOGOSDELIVERY_PATH)
         NAME delivery_module_integration_tests
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
+            ../src/delivery_eligibility.cpp
             mocks/delivery_module_events_stub.cpp
         TEST_SOURCES
             main.cpp
             test_delivery_integration.cpp
         EXTRA_INCLUDES
             ../lib
+            ${CMAKE_BINARY_DIR}/generated_code
         EXTRA_LINK_LIBS
             ${LIBLOGOSDELIVERY_PATH}
     )

@@ -17,10 +17,7 @@
 #include <logos_clib_mock.h>
 #include <cstring>
 
-#define RET_OK  0
-#define RET_ERR 1
-
-typedef void (*logosdelivery_callback)(int callerRet, const char* msg, size_t len, void* userData);
+#include "../stubs/lib/liblogosdelivery.h"
 
 // Sentinel address used as a fake non-null delivery context.
 static char s_fakeCtx = 0;
@@ -143,4 +140,40 @@ int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_callback cb
     return RET_OK;
 }
 
+static EligibilityVerifierCb s_verifierCb = nullptr;
+static void* s_verifierUserData = nullptr;
+static EligibilityProviderCb s_providerCb = nullptr;
+static void* s_providerUserData = nullptr;
+
+int logosdelivery_set_eligibility_verifier(void* /*ctx*/, EligibilityVerifierCb cb, void* user_data) {
+    LOGOS_CMOCK_RECORD("logosdelivery_set_eligibility_verifier");
+    s_verifierCb = cb;
+    s_verifierUserData = user_data;
+    return LOGOS_CMOCK_RETURN(int, "logosdelivery_set_eligibility_verifier");
+}
+
+int logosdelivery_set_eligibility_provider(void* /*ctx*/, EligibilityProviderCb cb, void* user_data) {
+    LOGOS_CMOCK_RECORD("logosdelivery_set_eligibility_provider");
+    s_providerCb = cb;
+    s_providerUserData = user_data;
+    return LOGOS_CMOCK_RETURN(int, "logosdelivery_set_eligibility_provider");
+}
+
+int logosdelivery_store_query(
+    void* /*ctx*/,
+    logosdelivery_callback cb,
+    void* userData,
+    const char* /*queryJson*/,
+    const char* /*providerAddr*/)
+{
+    LOGOS_CMOCK_RECORD("logosdelivery_store_query");
+    invokeOk("logosdelivery_store_query", cb, userData);
+    return RET_OK;
+}
+
 } // extern "C"
+
+EligibilityVerifierCb delivery_mock_lastVerifierCb() { return s_verifierCb; }
+void* delivery_mock_lastVerifierUserData() { return s_verifierUserData; }
+EligibilityProviderCb delivery_mock_lastProviderCb() { return s_providerCb; }
+void* delivery_mock_lastProviderUserData() { return s_providerUserData; }
