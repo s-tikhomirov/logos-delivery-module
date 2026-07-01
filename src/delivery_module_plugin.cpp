@@ -745,7 +745,7 @@ int DeliveryModuleImpl::eligibilityProviderTrampoline(
     return runOnOwnerThread(static_cast<QObject*>(client), [&]() -> int {
         const QVariant result = client->invokeRemoteMethod(
             moduleQ,
-            QStringLiteral("prepareEligibilityForStoreQuery"),
+            QStringLiteral("prepareEligibilityProofWithStreamProposalForStoreQuery"),
             canonical,
             providerPeer);
 
@@ -812,7 +812,7 @@ StdLogosResult DeliveryModuleImpl::setEligibilityProvider(const std::string& mod
     }
 
     const StdLogosResult validation = validateTargetModule(
-        moduleName, "prepareEligibilityForStoreQuery");
+        moduleName, "prepareEligibilityProofWithStreamProposalForStoreQuery");
     if (!validation.success) {
         return validation;
     }

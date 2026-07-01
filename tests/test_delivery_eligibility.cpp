@@ -45,7 +45,7 @@ static QJsonArray methodsWithVerify()
 static QJsonArray methodsWithPrepare()
 {
     QJsonArray methods;
-    methods.append(QStringLiteral("prepareEligibilityForStoreQuery"));
+    methods.append(QStringLiteral("prepareEligibilityProofWithStreamProposalForStoreQuery"));
     return methods;
 }
 

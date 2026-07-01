@@ -283,7 +283,7 @@ public:
      * @brief Register the module that prepares outbound Store eligibility proofs.
      *
      * Empty @p moduleName clears a previous registration. Requires @ref createNode first.
-     * Validates @c prepareEligibilityForStoreQuery via @c getPluginMethods before commit.
+     * Validates @c prepareEligibilityProofWithStreamProposalForStoreQuery via @c getPluginMethods before commit.
      */
     StdLogosResult setEligibilityProvider(const std::string& moduleName);
 
