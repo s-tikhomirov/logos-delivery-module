@@ -48,8 +48,8 @@ LOGOS_TEST(pluginMethodsInclude_finds_method) {
 
 LOGOS_TEST(pluginMethodsInclude_finds_method_in_object_array) {
     LOGOS_ASSERT_TRUE(delivery_eligibility::pluginMethodsInclude(
-        R"([{"name":"prepareEligibilityForStoreQuery"},{"name":"verifyEligibilityForStoreQuery"}])",
+        R"([{"name":"prepareEligibilityProofWithStreamProposalForStoreQuery"},{"name":"verifyEligibilityForStoreQuery"}])",
         "verifyEligibilityForStoreQuery"));
     LOGOS_ASSERT_FALSE(delivery_eligibility::pluginMethodsInclude(
-        R"([{"name":"prepareEligibilityForStoreQuery"}])", "verifyEligibilityForStoreQuery"));
+        R"([{"name":"prepareEligibilityProofWithStreamProposalForStoreQuery"}])", "verifyEligibilityForStoreQuery"));
 }
