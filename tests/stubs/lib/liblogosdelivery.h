@@ -54,7 +54,7 @@ int logosdelivery_get_available_configs(void* ctx, logosdelivery_callback cb, vo
 typedef int (*EligibilityVerifierCb)(
     const char* proof_hex,
     const char* canonical_hex,
-    const char* requester_peer_id,
+    const char* user_peer_id,
     char* out_desc,
     size_t out_desc_len,
     void* user_data);

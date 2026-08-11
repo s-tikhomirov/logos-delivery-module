@@ -562,13 +562,13 @@ void DeliveryModuleImpl::clearEligibilityHooksAtFfi()
 int DeliveryModuleImpl::eligibilityVerifierTrampoline(
     const char* proof_hex,
     const char* canonical_hex,
-    const char* requester_peer_id,
+    const char* user_peer_id,
     char* out_desc,
     size_t out_desc_len,
     void* user_data)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(user_data);
-    if (impl == nullptr || canonical_hex == nullptr || requester_peer_id == nullptr) {
+    if (impl == nullptr || canonical_hex == nullptr || user_peer_id == nullptr) {
         return delivery_eligibility::kStatusInternalError;
     }
 
@@ -584,7 +584,7 @@ int DeliveryModuleImpl::eligibilityVerifierTrampoline(
 
     const QString proofBytes = (proof_hex != nullptr) ? QString::fromUtf8(proof_hex) : QString();
     const QString canonical = QString::fromUtf8(canonical_hex);
-    const QString requester = QString::fromUtf8(requester_peer_id);
+    const QString user = QString::fromUtf8(user_peer_id);
     const QString moduleQ = QString::fromStdString(moduleName);
 
     LogosAPIClient* client = api->getClient(moduleQ);
@@ -598,7 +598,7 @@ int DeliveryModuleImpl::eligibilityVerifierTrampoline(
             QStringLiteral("verifyEligibilityForStoreQuery"),
             proofBytes,
             canonical,
-            requester);
+            user);
 
         const std::string json = eligibilityJsonFromVariant(result);
         if (json.empty()) {
