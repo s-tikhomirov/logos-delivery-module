@@ -167,7 +167,7 @@ int logosdelivery_set_eligibility_provider(void* ctx, EligibilityProviderCb cb, 
 
 int logosdelivery_store_query(
     void* ctx,
-    logosdelivery_callback cb,
+    FFICallBack cb,
     void* userData,
     const char* queryJson,
     const char* providerAddr);

@@ -11,6 +11,13 @@
         "impl_header": "delivery_module_plugin.h"
     },
     "dependencies": [],
+    "interface_dependencies": [
+        {
+            "name": "store_eligibility",
+            "file": "interfaces/store_eligibility.h",
+            "impl_class": "IStoreEligibility"
+        }
+    ],
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",

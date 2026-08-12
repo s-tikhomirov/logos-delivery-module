@@ -11,23 +11,15 @@
 #include <semaphore>
 #include <unordered_map>
 
-#include <QString>
-#include <QCoreApplication>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QMetaType>
-#include <QThread>
-#include <QVariantMap>
-#include <logos_api.h>
-#include <logos_api_client.h>
-#if __has_include(<cpp/logos_thread_marshal.h>)
-#include <cpp/logos_thread_marshal.h>
-#endif
 #if __has_include("generated_code/logos_sdk.h")
 #include "generated_code/logos_sdk.h"
 #else
 #include "logos_sdk.h"
+#endif
+#if __has_include(<cpp/logos_call_error.h>)
+#include <cpp/logos_call_error.h>
+#elif __has_include(<logos_call_error.h>)
+#include <logos_call_error.h>
 #endif
 
 #include <nlohmann/json.hpp>
@@ -44,61 +36,6 @@ extern "C" {
 
 namespace {
 namespace b64 = boost::beast::detail::base64;
-
-#if !__has_include(<cpp/logos_thread_marshal.h>)
-template <typename Fn>
-auto runOnOwnerThread(QObject* obj, Fn&& fn) -> decltype(fn())
-{
-    using Ret = decltype(fn());
-    static_assert(!std::is_reference_v<Ret>,
-                  "runOnOwnerThread does not support reference return types");
-    if (obj == nullptr || QThread::currentThread() == obj->thread()) {
-        return fn();
-    }
-    if constexpr (std::is_void_v<Ret>) {
-        QMetaObject::invokeMethod(obj, [&]() { fn(); }, Qt::BlockingQueuedConnection);
-        return;
-    } else {
-        Ret ret{};
-        QMetaObject::invokeMethod(obj, [&]() { ret = fn(); }, Qt::BlockingQueuedConnection);
-        return ret;
-    }
-}
-#else
-using logos::runOnOwnerThread;
-#endif
-
-std::string eligibilityJsonFromVariant(const QVariant& result)
-{
-    if (!result.isValid()) {
-        return {};
-    }
-    if (result.canConvert<QVariantMap>()) {
-        const QVariantMap map = result.toMap();
-        if (map.contains(QStringLiteral("result"))) {
-            return eligibilityJsonFromVariant(map.value(QStringLiteral("result")));
-        }
-    }
-    if (result.typeId() == QMetaType::QString) {
-        return result.toString().toStdString();
-    }
-    if (result.typeId() == QMetaType::QByteArray) {
-        return QString::fromUtf8(result.toByteArray()).toStdString();
-    }
-    if (result.canConvert<QJsonObject>()) {
-        return QJsonDocument(result.toJsonObject())
-            .toJson(QJsonDocument::Compact)
-            .toStdString();
-    }
-    if (result.canConvert<QString>()) {
-        return result.toString().toStdString();
-    }
-    const QString asString = result.toString();
-    if (!asString.isEmpty()) {
-        return asString.toStdString();
-    }
-    return {};
-}
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
@@ -569,50 +506,6 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     return outcome;
 }
 
-LogosAPI* DeliveryModuleImpl::logosApiOrNull() const
-{
-    if (!isContextReady()) {
-        return nullptr;
-    }
-    return modules().api;
-}
-
-StdLogosResult DeliveryModuleImpl::validateTargetModule(
-    const std::string& moduleName,
-    const char* requiredMethod)
-{
-    LogosAPI* api = logosApiOrNull();
-    if (api == nullptr) {
-        return {false, {}, "LogosAPI not available"};
-    }
-
-    LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
-    if (client == nullptr || !client->isConnected()) {
-        return {false, {}, "Module not connected: " + moduleName};
-    }
-
-    const QVariant result = client->invokeRemoteMethod(
-        QString::fromStdString(moduleName),
-        QStringLiteral("getPluginMethods"));
-
-    std::string methodsJson;
-    if (result.canConvert<QJsonArray>()) {
-        const QJsonDocument doc(result.toJsonArray());
-        methodsJson = doc.toJson(QJsonDocument::Compact).toStdString();
-    } else if (result.typeId() == QMetaType::QString) {
-        methodsJson = result.toString().toStdString();
-    } else {
-        return {false, {}, "getPluginMethods returned unexpected type for: " + moduleName};
-    }
-
-    if (!delivery_eligibility::pluginMethodsInclude(methodsJson.c_str(), requiredMethod)) {
-        return {false, {},
-                std::string("Module missing required method: ") + requiredMethod};
-    }
-
-    return {true, {}};
-}
-
 void DeliveryModuleImpl::applyVerifierHookRegistration(bool enable)
 {
     if (deliveryCtx == nullptr) {
@@ -672,42 +565,30 @@ int DeliveryModuleImpl::eligibilityVerifierTrampoline(
     if (impl == nullptr || canonical_hex == nullptr || user_peer_id == nullptr) {
         return delivery_eligibility::kStatusInternalError;
     }
+    if (!impl->isContextReady()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
 
     std::string moduleName;
     {
         std::lock_guard<std::mutex> lock(impl->eligibilityMutex);
         moduleName = impl->verifierModuleName;
     }
-    LogosAPI* api = impl->logosApiOrNull();
-    if (api == nullptr || moduleName.empty()) {
+    if (moduleName.empty()) {
         return delivery_eligibility::kStatusInternalError;
     }
 
-    const QString proofBytes = (proof_hex != nullptr) ? QString::fromUtf8(proof_hex) : QString();
-    const QString canonical = QString::fromUtf8(canonical_hex);
-    const QString user = QString::fromUtf8(user_peer_id);
-    const QString moduleQ = QString::fromStdString(moduleName);
-
-    LogosAPIClient* client = api->getClient(moduleQ);
-    if (client == nullptr) {
+    const std::string proof = (proof_hex != nullptr) ? std::string(proof_hex) : std::string();
+    logos::CallError err;
+    const std::string json = impl->modules()
+        .bind_store_eligibility(moduleName)
+        .verifyEligibilityForStoreQuery(
+            proof, std::string(canonical_hex), std::string(user_peer_id), &err);
+    if (!err.ok() || json.empty()) {
         return delivery_eligibility::kStatusInternalError;
     }
-
-    return runOnOwnerThread(static_cast<QObject*>(client), [&]() -> int {
-        const QVariant result = client->invokeRemoteMethod(
-            moduleQ,
-            QStringLiteral("verifyEligibilityForStoreQuery"),
-            proofBytes,
-            canonical,
-            user);
-
-        const std::string json = eligibilityJsonFromVariant(result);
-        if (json.empty()) {
-            return delivery_eligibility::kStatusInternalError;
-        }
-        return delivery_eligibility::eligibilityCodeFromVerifyJson(
-            json.c_str(), out_desc, out_desc_len);
-    });
+    return delivery_eligibility::eligibilityCodeFromVerifyJson(
+        json.c_str(), out_desc, out_desc_len);
 }
 
 int DeliveryModuleImpl::eligibilityProviderTrampoline(
@@ -721,41 +602,29 @@ int DeliveryModuleImpl::eligibilityProviderTrampoline(
     if (impl == nullptr || canonical_hex == nullptr || provider_peer_id == nullptr) {
         return delivery_eligibility::kStatusInternalError;
     }
+    if (!impl->isContextReady()) {
+        return delivery_eligibility::kStatusInternalError;
+    }
 
     std::string moduleName;
     {
         std::lock_guard<std::mutex> lock(impl->eligibilityMutex);
         moduleName = impl->providerModuleName;
     }
-
-    LogosAPI* api = impl->logosApiOrNull();
-    if (api == nullptr || moduleName.empty()) {
+    if (moduleName.empty()) {
         return delivery_eligibility::kStatusInternalError;
     }
 
-    const QString canonical = QString::fromUtf8(canonical_hex);
-    const QString providerPeer = QString::fromUtf8(provider_peer_id);
-    const QString moduleQ = QString::fromStdString(moduleName);
-
-    LogosAPIClient* client = api->getClient(moduleQ);
-    if (client == nullptr) {
+    logos::CallError err;
+    const std::string json = impl->modules()
+        .bind_store_eligibility(moduleName)
+        .prepareEligibilityProofWithStreamProposalForStoreQuery(
+            std::string(canonical_hex), std::string(provider_peer_id), &err);
+    if (!err.ok() || json.empty()) {
         return delivery_eligibility::kStatusInternalError;
     }
-
-    return runOnOwnerThread(static_cast<QObject*>(client), [&]() -> int {
-        const QVariant result = client->invokeRemoteMethod(
-            moduleQ,
-            QStringLiteral("prepareEligibilityProofWithStreamProposalForStoreQuery"),
-            canonical,
-            providerPeer);
-
-        const std::string json = eligibilityJsonFromVariant(result);
-        if (json.empty()) {
-            return delivery_eligibility::kStatusInternalError;
-        }
-        return delivery_eligibility::eligibilityProofHexFromPrepareJson(
-            json.c_str(), out_proof_hex, out_buf_len);
-    });
+    return delivery_eligibility::eligibilityProofHexFromPrepareJson(
+        json.c_str(), out_proof_hex, out_buf_len);
 }
 
 void DeliveryModuleImpl::storeQueryWithEligibility_callback(
@@ -787,12 +656,6 @@ StdLogosResult DeliveryModuleImpl::setEligibilityVerifier(const std::string& mod
         return {true, {}};
     }
 
-    const StdLogosResult validation = validateTargetModule(
-        moduleName, "verifyEligibilityForStoreQuery");
-    if (!validation.success) {
-        return validation;
-    }
-
     verifierModuleName = moduleName;
     applyVerifierHookRegistration(true);
     return {true, {}};
@@ -809,12 +672,6 @@ StdLogosResult DeliveryModuleImpl::setEligibilityProvider(const std::string& mod
     if (moduleName.empty()) {
         applyProviderHookRegistration(false);
         return {true, {}};
-    }
-
-    const StdLogosResult validation = validateTargetModule(
-        moduleName, "prepareEligibilityProofWithStreamProposalForStoreQuery");
-    if (!validation.success) {
-        return validation;
     }
 
     providerModuleName = moduleName;

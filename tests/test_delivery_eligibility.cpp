@@ -2,9 +2,6 @@
 
 #include <memory>
 
-#include <QJsonArray>
-#include <QString>
-
 #include "delivery_module_plugin.h"
 #include "logos_sdk.h"
 #include "mocks/delivery_eligibility_mock_access.h"
@@ -15,7 +12,8 @@ struct TestLogosModulesHolder {
 
     void reset(LogosAPI* api)
     {
-        modules = std::make_unique<LogosModules>(api);
+        modules = std::make_unique<LogosModules>();
+        modules->setTestApi(api);
     }
 };
 
@@ -35,20 +33,6 @@ static DeliveryModuleImpl* createInitializedImplWithApi(LogosTestContext& t, Tes
     return impl;
 }
 
-static QJsonArray methodsWithVerify()
-{
-    QJsonArray methods;
-    methods.append(QStringLiteral("verifyEligibilityForStoreQuery"));
-    return methods;
-}
-
-static QJsonArray methodsWithPrepare()
-{
-    QJsonArray methods;
-    methods.append(QStringLiteral("prepareEligibilityProofWithStreamProposalForStoreQuery"));
-    return methods;
-}
-
 LOGOS_TEST(setEligibilityVerifier_fails_without_createNode) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
@@ -57,58 +41,14 @@ LOGOS_TEST(setEligibilityVerifier_fails_without_createNode) {
     LOGOS_ASSERT_FALSE(impl.setEligibilityVerifier("payment_streams_module").success);
 }
 
-LOGOS_TEST(setEligibilityVerifier_rejects_missing_method) {
-    auto t = LogosTestContext("delivery_module");
-    TestLogosModulesHolder holder;
-    auto* impl = createInitializedImplWithApi(t, holder);
-
-    QJsonArray methods;
-    methods.append(QStringLiteral("otherMethod"));
-    t.mockModule("bad_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methods));
-
-    const StdLogosResult result = impl->setEligibilityVerifier("bad_module");
-    LOGOS_ASSERT_FALSE(result.success);
-    LOGOS_ASSERT_CONTAINS(result.error, "verifyEligibilityForStoreQuery");
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_eligibility_verifier"));
-
-    delete impl;
-}
-
 LOGOS_TEST(setEligibilityVerifier_registers_ffi_hook) {
     auto t = LogosTestContext("delivery_module");
     TestLogosModulesHolder holder;
     auto* impl = createInitializedImplWithApi(t, holder);
 
-    t.mockModule("ps_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methodsWithVerify()));
     LOGOS_ASSERT_TRUE(impl->setEligibilityVerifier("ps_module").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_eligibility_verifier"));
     LOGOS_ASSERT(delivery_mock_lastVerifierCb() != nullptr);
-
-    delete impl;
-}
-
-LOGOS_TEST(setEligibilityVerifier_failed_set_keeps_prior_registration) {
-    auto t = LogosTestContext("delivery_module");
-    TestLogosModulesHolder holder;
-    auto* impl = createInitializedImplWithApi(t, holder);
-
-    t.mockModule("good_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methodsWithVerify()));
-    LOGOS_ASSERT_TRUE(impl->setEligibilityVerifier("good_module").success);
-    const auto firstCb = delivery_mock_lastVerifierCb();
-
-    QJsonArray emptyMethods;
-    t.mockModule("bad_module", "getPluginMethods").returnsVariant(QVariant::fromValue(emptyMethods));
-    LOGOS_ASSERT_FALSE(impl->setEligibilityVerifier("bad_module").success);
-    LOGOS_ASSERT_EQ(delivery_mock_lastVerifierCb(), firstCb);
-
-    t.mockModule("good_module", "verifyEligibilityForStoreQuery")
-        .returns(R"({"status":"ok","eligibility":"OK"})");
-
-    char desc[32] = {};
-    const int code = delivery_mock_lastVerifierCb()(
-        nullptr, "aa", "peer1", desc, sizeof(desc), delivery_mock_lastVerifierUserData());
-    LOGOS_ASSERT_EQ(code, 0);
-    LOGOS_ASSERT_EQ(t.moduleCallCount("good_module", "verifyEligibilityForStoreQuery"), 1);
 
     delete impl;
 }
@@ -118,7 +58,6 @@ LOGOS_TEST(verifier_trampoline_null_proof_invokes_module) {
     TestLogosModulesHolder holder;
     auto* impl = createInitializedImplWithApi(t, holder);
 
-    t.mockModule("ps_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methodsWithVerify()));
     LOGOS_ASSERT_TRUE(impl->setEligibilityVerifier("ps_module").success);
 
     t.mockModule("ps_module", "verifyEligibilityForStoreQuery")
@@ -157,7 +96,6 @@ LOGOS_TEST(setEligibilityProvider_registers_ffi_hook) {
     TestLogosModulesHolder holder;
     auto* impl = createInitializedImplWithApi(t, holder);
 
-    t.mockModule("ps_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methodsWithPrepare()));
     LOGOS_ASSERT_TRUE(impl->setEligibilityProvider("ps_module").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_eligibility_provider"));
     LOGOS_ASSERT(delivery_mock_lastProviderCb() != nullptr);
@@ -170,7 +108,6 @@ LOGOS_TEST(clear_eligibility_verifier_calls_ffi_null) {
     TestLogosModulesHolder holder;
     auto* impl = createInitializedImplWithApi(t, holder);
 
-    t.mockModule("ps_module", "getPluginMethods").returnsVariant(QVariant::fromValue(methodsWithVerify()));
     LOGOS_ASSERT_TRUE(impl->setEligibilityVerifier("ps_module").success);
     LOGOS_ASSERT_TRUE(impl->setEligibilityVerifier("").success);
     LOGOS_ASSERT_EQ(delivery_mock_lastVerifierCb(), nullptr);

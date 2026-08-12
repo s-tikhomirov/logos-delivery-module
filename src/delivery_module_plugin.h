@@ -275,7 +275,7 @@ public:
      * @brief Register the module that verifies inbound Store eligibility proofs.
      *
      * Empty @p moduleName clears a previous registration. Requires @ref createNode first.
-     * Validates @c verifyEligibilityForStoreQuery via @c getPluginMethods before commit.
+     * The named module is bound at call time via @c modules().bind_store_eligibility.
      */
     StdLogosResult setEligibilityVerifier(const std::string& moduleName);
 
@@ -283,7 +283,7 @@ public:
      * @brief Register the module that prepares outbound Store eligibility proofs.
      *
      * Empty @p moduleName clears a previous registration. Requires @ref createNode first.
-     * Validates @c prepareEligibilityProofWithStreamProposalForStoreQuery via @c getPluginMethods before commit.
+     * The named module is bound at call time via @c modules().bind_store_eligibility.
      */
     StdLogosResult setEligibilityProvider(const std::string& moduleName);
 
@@ -322,8 +322,6 @@ private:
     bool verifierHookAtFfi = false;
     bool providerHookAtFfi = false;
 
-    class LogosAPI* logosApiOrNull() const;
-    StdLogosResult validateTargetModule(const std::string& moduleName, const char* requiredMethod);
     void clearEligibilityHooksAtFfi();
     void applyVerifierHookRegistration(bool enable);
     void applyProviderHookRegistration(bool enable);
