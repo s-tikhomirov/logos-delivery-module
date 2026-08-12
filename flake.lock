@@ -3824,11 +3824,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1786463763,
-        "narHash": "sha256-1ofK+8XBO45FtrHkvrQ29fhU4ZOLBI5fVm2Ta3tRQs0=",
+        "lastModified": 1786547497,
+        "narHash": "sha256-BPFBPNZxTpExNU719kj9WHN6TzilOhEFMPswoStFhX0=",
         "ref": "feat/payment-streams-store-eligibility",
-        "rev": "155957ad8d0d05acaca0811dd5f1739109eb04f3",
-        "revCount": 2402,
+        "rev": "c101e31aa78f0d0002ae18cba6582b3a35e51ee3",
+        "revCount": 2436,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
