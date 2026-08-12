@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <semaphore>
+#include <type_traits>
 #include <unordered_map>
 
 #if __has_include("generated_code/logos_sdk.h")
@@ -25,6 +26,34 @@
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
 
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMetaType>
+#include <QObject>
+#include <QString>
+#include <QVariant>
+#include <QVariantMap>
+
+#include <chrono>
+#include <future>
+
+#if __has_include(<cpp/logos_thread_marshal.h>)
+#include <cpp/logos_thread_marshal.h>
+#elif __has_include(<logos_thread_marshal.h>)
+#include <logos_thread_marshal.h>
+#endif
+#if __has_include(<logos_api.h>)
+#include <logos_api.h>
+#endif
+#if __has_include(<logos_api_client.h>)
+#include <logos_api_client.h>
+#endif
+#if __has_include(<logos_lp_client.h>)
+#include <logos_lp_client.h>
+#elif __has_include(<cpp/logos_lp_client.h>)
+#include <cpp/logos_lp_client.h>
+#endif
+
 #include "api_call_handler.h"
 extern "C" {
 #include <liblogosdelivery.h>
@@ -36,6 +65,248 @@ extern "C" {
 
 namespace {
 namespace b64 = boost::beast::detail::base64;
+
+// Generated Lp LogosModules caches bind_store_eligibility State (LpClient) for
+// the process lifetime. Clear when present so reloads of the target module do
+// not keep a dead client. Std/Qt LogosModules has no such map.
+template <typename Modules>
+void dropBoundStoreEligibility(Modules& modules)
+{
+    if constexpr (requires { modules.m_store_eligibility_bound.clear(); }) {
+        modules.m_store_eligibility_bound.clear();
+    }
+}
+
+// payment_streams returns QString JSON. Generated std bind_* wrappers decode
+// via QVariant::toMap() and drop strings; Lp bind_* sync from the Qt event-loop
+// thread deadlocks QRO replies. Prefer LogosAPIClient when modules.api exists
+// (unit stubs); production universal builds use LpClient invokeAsync.
+std::string eligibilityJsonFromVariant(const QVariant& result)
+{
+    if (!result.isValid()) {
+        return {};
+    }
+    if (result.canConvert<QVariantMap>()) {
+        const QVariantMap map = result.toMap();
+        if (map.contains(QStringLiteral("result"))) {
+            return eligibilityJsonFromVariant(map.value(QStringLiteral("result")));
+        }
+        if (map.contains(QStringLiteral("status"))) {
+            return QJsonDocument(QJsonObject::fromVariantMap(map))
+                .toJson(QJsonDocument::Compact)
+                .toStdString();
+        }
+    }
+    if (result.typeId() == QMetaType::QString) {
+        return result.toString().toStdString();
+    }
+    if (result.typeId() == QMetaType::QByteArray) {
+        return QString::fromUtf8(result.toByteArray()).toStdString();
+    }
+    if (result.canConvert<QJsonObject>()) {
+        return QJsonDocument(result.toJsonObject())
+            .toJson(QJsonDocument::Compact)
+            .toStdString();
+    }
+    if (result.canConvert<QString>()) {
+        return result.toString().toStdString();
+    }
+    const QString asString = result.toString();
+    if (!asString.isEmpty()) {
+        return asString.toStdString();
+    }
+    return {};
+}
+
+template <typename Modules>
+std::string callVerifyEligibilityViaBind(
+    Modules& modules,
+    const std::string& moduleName,
+    const std::string& proof,
+    const std::string& canonical,
+    const std::string& user,
+    logos::CallError* err)
+{
+    dropBoundStoreEligibility(modules);
+#if defined(LOGOS_HAS_LP_CLIENT) || __has_include(<logos_lp_client.h>) || __has_include(<cpp/logos_lp_client.h>)
+    {
+        logos::LpClient client(moduleName, "delivery_module");
+        nlohmann::json args = nlohmann::json::array({proof, canonical, user});
+        std::promise<nlohmann::json> done;
+        std::future<nlohmann::json> fut = done.get_future();
+        client.invokeAsync(
+            "verifyEligibilityForStoreQuery",
+            args,
+            [&done](nlohmann::json result) { done.set_value(std::move(result)); });
+        constexpr auto kTimeout = std::chrono::seconds(25);
+        if (fut.wait_for(kTimeout) != std::future_status::ready) {
+            if (err != nullptr) {
+                err->code = "timeout";
+                err->message = "lp verifyEligibilityForStoreQuery async timed out";
+            }
+            std::fprintf(stderr, "[delivery_module] verify via lp async: timeout\n");
+            return {};
+        }
+        const nlohmann::json wire = fut.get();
+        std::string json = delivery_eligibility::eligibilityJsonFromInvokeResult(wire);
+        if (json.empty()) {
+            dropBoundStoreEligibility(modules);
+            logos::LpClient retryClient(moduleName, "delivery_module");
+            std::promise<nlohmann::json> done2;
+            std::future<nlohmann::json> fut2 = done2.get_future();
+            retryClient.invokeAsync(
+                "verifyEligibilityForStoreQuery",
+                args,
+                [&done2](nlohmann::json result) { done2.set_value(std::move(result)); });
+            if (fut2.wait_for(kTimeout) == std::future_status::ready) {
+                json = delivery_eligibility::eligibilityJsonFromInvokeResult(fut2.get());
+            }
+            std::fprintf(
+                stderr,
+                "[delivery_module] verify via lp async: empty first type=%s retry_empty=%d\n",
+                wire.type_name(),
+                json.empty() ? 1 : 0);
+        }
+        if (err != nullptr) {
+            err->clear();
+        }
+        return json;
+    }
+#else
+    const auto wire = modules.bind_store_eligibility(moduleName)
+        .verifyEligibilityForStoreQuery(proof, canonical, user, err);
+    return delivery_eligibility::eligibilityJsonFromInvokeResult(wire);
+#endif
+}
+
+template <typename Modules>
+std::string callVerifyEligibility(
+    Modules& modules,
+    const std::string& moduleName,
+    const std::string& proof,
+    const std::string& canonical,
+    const std::string& user,
+    logos::CallError* err)
+{
+    if constexpr (requires { modules.api; }) {
+        LogosAPI* api = modules.api;
+        if (api == nullptr) {
+            if (err != nullptr) {
+                err->code = "object_unavailable";
+                err->message = "LogosAPI not available";
+            }
+            return {};
+        }
+        LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
+        if (client == nullptr) {
+            if (err != nullptr) {
+                err->code = "object_unavailable";
+                err->message = "module not connected: " + moduleName;
+            }
+            return {};
+        }
+        return logos::runOnOwnerThread(static_cast<QObject*>(client), [&]() -> std::string {
+            const QVariant result = client->invokeRemoteMethod(
+                QString::fromStdString(moduleName),
+                QStringLiteral("verifyEligibilityForStoreQuery"),
+                QString::fromStdString(proof),
+                QString::fromStdString(canonical),
+                QString::fromStdString(user));
+            std::string json = eligibilityJsonFromVariant(result);
+            if (json.empty()) {
+                (void)client->reconnect();
+                const QVariant retry = client->invokeRemoteMethod(
+                    QString::fromStdString(moduleName),
+                    QStringLiteral("verifyEligibilityForStoreQuery"),
+                    QString::fromStdString(proof),
+                    QString::fromStdString(canonical),
+                    QString::fromStdString(user));
+                json = eligibilityJsonFromVariant(retry);
+                std::fprintf(
+                    stderr,
+                    "[delivery_module] verify via api: first empty valid=%d type=%d "
+                    "retry_empty=%d connected=%d\n",
+                    result.isValid() ? 1 : 0,
+                    result.typeId(),
+                    json.empty() ? 1 : 0,
+                    client->isConnected() ? 1 : 0);
+            }
+            if (err != nullptr) {
+                err->clear();
+            }
+            return json;
+        });
+    } else {
+        return callVerifyEligibilityViaBind(
+            modules, moduleName, proof, canonical, user, err);
+    }
+}
+
+template <typename Modules>
+std::string callPrepareEligibility(
+    Modules& modules,
+    const std::string& moduleName,
+    const std::string& canonical,
+    const std::string& provider,
+    logos::CallError* err)
+{
+    if constexpr (requires { modules.api; }) {
+        LogosAPI* api = modules.api;
+        if (api == nullptr) {
+            if (err != nullptr) {
+                err->code = "object_unavailable";
+                err->message = "LogosAPI not available";
+            }
+            return {};
+        }
+        LogosAPIClient* client = api->getClient(QString::fromStdString(moduleName));
+        if (client == nullptr) {
+            if (err != nullptr) {
+                err->code = "object_unavailable";
+                err->message = "module not connected: " + moduleName;
+            }
+            return {};
+        }
+        return logos::runOnOwnerThread(static_cast<QObject*>(client), [&]() -> std::string {
+            const QVariant result = client->invokeRemoteMethod(
+                QString::fromStdString(moduleName),
+                QStringLiteral("prepareEligibilityProofWithStreamProposalForStoreQuery"),
+                QString::fromStdString(canonical),
+                QString::fromStdString(provider));
+            if (err != nullptr) {
+                err->clear();
+            }
+            return eligibilityJsonFromVariant(result);
+        });
+    } else {
+        dropBoundStoreEligibility(modules);
+#if defined(LOGOS_HAS_LP_CLIENT) || __has_include(<logos_lp_client.h>) || __has_include(<cpp/logos_lp_client.h>)
+        logos::LpClient client(moduleName, "delivery_module");
+        nlohmann::json args = nlohmann::json::array({canonical, provider});
+        std::promise<nlohmann::json> done;
+        std::future<nlohmann::json> fut = done.get_future();
+        client.invokeAsync(
+            "prepareEligibilityProofWithStreamProposalForStoreQuery",
+            args,
+            [&done](nlohmann::json result) { done.set_value(std::move(result)); });
+        if (fut.wait_for(std::chrono::seconds(25)) != std::future_status::ready) {
+            if (err != nullptr) {
+                err->code = "timeout";
+                err->message = "lp prepareEligibility async timed out";
+            }
+            return {};
+        }
+        if (err != nullptr) {
+            err->clear();
+        }
+        return delivery_eligibility::eligibilityJsonFromInvokeResult(fut.get());
+#else
+        const auto wire = modules.bind_store_eligibility(moduleName)
+            .prepareEligibilityProofWithStreamProposalForStoreQuery(canonical, provider, err);
+        return delivery_eligibility::eligibilityJsonFromInvokeResult(wire);
+#endif
+    }
+}
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
@@ -579,12 +850,19 @@ int DeliveryModuleImpl::eligibilityVerifierTrampoline(
     }
 
     const std::string proof = (proof_hex != nullptr) ? std::string(proof_hex) : std::string();
+    const std::string canonical(canonical_hex);
+    const std::string user(user_peer_id);
+
     logos::CallError err;
-    const std::string json = impl->modules()
-        .bind_store_eligibility(moduleName)
-        .verifyEligibilityForStoreQuery(
-            proof, std::string(canonical_hex), std::string(user_peer_id), &err);
+    const std::string json = callVerifyEligibility(
+        impl->modules(), moduleName, proof, canonical, user, &err);
     if (!err.ok() || json.empty()) {
+        std::fprintf(
+            stderr,
+            "[delivery_module] eligibility verify failed code=%s message=%s json_empty=%d\n",
+            err.code.c_str(),
+            err.message.c_str(),
+            json.empty() ? 1 : 0);
         return delivery_eligibility::kStatusInternalError;
     }
     return delivery_eligibility::eligibilityCodeFromVerifyJson(
@@ -615,12 +893,19 @@ int DeliveryModuleImpl::eligibilityProviderTrampoline(
         return delivery_eligibility::kStatusInternalError;
     }
 
+    const std::string canonical(canonical_hex);
+    const std::string provider(provider_peer_id);
+
     logos::CallError err;
-    const std::string json = impl->modules()
-        .bind_store_eligibility(moduleName)
-        .prepareEligibilityProofWithStreamProposalForStoreQuery(
-            std::string(canonical_hex), std::string(provider_peer_id), &err);
+    const std::string json = callPrepareEligibility(
+        impl->modules(), moduleName, canonical, provider, &err);
     if (!err.ok() || json.empty()) {
+        std::fprintf(
+            stderr,
+            "[delivery_module] eligibility prepare failed code=%s message=%s json_empty=%d\n",
+            err.code.c_str(),
+            err.message.c_str(),
+            json.empty() ? 1 : 0);
         return delivery_eligibility::kStatusInternalError;
     }
     return delivery_eligibility::eligibilityProofHexFromPrepareJson(

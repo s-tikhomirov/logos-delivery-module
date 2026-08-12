@@ -1,6 +1,7 @@
 #include "delivery_eligibility.h"
 
 #include <cstring>
+#include <string>
 
 #include <nlohmann/json.hpp>
 
@@ -38,6 +39,38 @@ void copyTruncated(const std::string& src, char* outDesc, size_t outDescLen)
 }
 
 } // namespace
+
+std::string eligibilityJsonFromInvokeResult(const nlohmann::json& result)
+{
+    if (result.is_string()) {
+        return result.get<std::string>();
+    }
+    if (!result.is_object()) {
+        return {};
+    }
+    if (result.contains("status")) {
+        return result.dump();
+    }
+    if (result.contains("value")) {
+        const nlohmann::json& value = result.at("value");
+        if (value.is_string()) {
+            return value.get<std::string>();
+        }
+        if (value.is_object()) {
+            return value.dump();
+        }
+    }
+    if (result.contains("result")) {
+        const nlohmann::json& nested = result.at("result");
+        if (nested.is_string()) {
+            return nested.get<std::string>();
+        }
+        if (nested.is_object()) {
+            return nested.dump();
+        }
+    }
+    return result.dump();
+}
 
 int eligibilityCodeFromVerifyJson(const char* json, char* outDesc, size_t outDescLen)
 {

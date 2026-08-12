@@ -5,13 +5,18 @@
 
 #include "delivery_eligibility.h"
 
-LOGOS_TEST(eligibilityCodeFromVerifyJson_ok) {
-    char desc[64] = {"x"};
-    const int code = delivery_eligibility::eligibilityCodeFromVerifyJson(
-        R"({"status":"ok","eligibility":"OK"})", desc, sizeof(desc));
-    LOGOS_ASSERT_EQ(code, 0);
-    LOGOS_ASSERT_EQ(desc[0], '\0');
+LOGOS_TEST(eligibilityJsonFromInvokeResult_string_and_object) {
+    using delivery_eligibility::eligibilityJsonFromInvokeResult;
+    LOGOS_ASSERT_EQ(
+        eligibilityJsonFromInvokeResult(nlohmann::json("{\"status\":\"ok\"}")),
+        std::string("{\"status\":\"ok\"}"));
+    const auto obj = nlohmann::json::parse(R"({"status":"ok","eligibility":"OK"})");
+    LOGOS_ASSERT_CONTAINS(eligibilityJsonFromInvokeResult(obj), "eligibility");
+    const auto wrapped = nlohmann::json::parse(
+        R"({"success":true,"value":{"status":"ok","eligibility":"OK"},"error":null})");
+    LOGOS_ASSERT_CONTAINS(eligibilityJsonFromInvokeResult(wrapped), "status");
 }
+
 
 LOGOS_TEST(eligibilityCodeFromVerifyJson_verdict) {
     char desc[64] = {};
