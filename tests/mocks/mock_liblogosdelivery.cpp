@@ -23,7 +23,7 @@
 static char s_fakeCtx = 0;
 
 // Helper: invoke callback with RET_OK and the string configured in the mock store.
-static void invokeOk(const char* funcName, logosdelivery_callback cb, void* userData) {
+static void invokeOk(const char* funcName, FFICallBack cb, void* userData) {
     if (!cb) return;
     const char* msg = LogosCMockStore::instance().getReturnString(funcName);
     cb(RET_OK, msg ? msg : "", msg ? strlen(msg) : 0, userData);
@@ -31,7 +31,7 @@ static void invokeOk(const char* funcName, logosdelivery_callback cb, void* user
 
 extern "C" {
 
-void* logosdelivery_create_node(const char* /*cfg*/, logosdelivery_callback cb, void* userData) {
+void* logosdelivery_create_node(const char* /*cfg*/, FFICallBack cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_create_node");
     int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_create_node");
     if (ok && cb) {
@@ -42,16 +42,16 @@ void* logosdelivery_create_node(const char* /*cfg*/, logosdelivery_callback cb, 
     return ok ? static_cast<void*>(&s_fakeCtx) : nullptr;
 }
 
-void logosdelivery_set_event_callback(void* /*ctx*/, logosdelivery_callback /*cb*/, void* /*userData*/) {
+void logosdelivery_set_event_callback(void* /*ctx*/, FFICallBack /*cb*/, void* /*userData*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_set_event_callback");
 }
 
-int logosdelivery_destroy(void* /*ctx*/, logosdelivery_callback /*cb*/, void* /*userData*/) {
+int logosdelivery_destroy(void* /*ctx*/, FFICallBack /*cb*/, void* /*userData*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_destroy");
     return RET_OK;
 }
 
-int logosdelivery_start_node(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
+int logosdelivery_start_node(void* /*ctx*/, FFICallBack cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_start_node");
     // Return value is the dispatch code (default 0 = RET_OK). Only fire the
     // completion callback when dispatch "succeeds", mirroring the real FFI.
@@ -62,7 +62,7 @@ int logosdelivery_start_node(void* /*ctx*/, logosdelivery_callback cb, void* use
     return dispatch;
 }
 
-int logosdelivery_stop_node(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
+int logosdelivery_stop_node(void* /*ctx*/, FFICallBack cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_stop_node");
     int dispatch = LOGOS_CMOCK_RETURN(int, "logosdelivery_stop_node");
     if (dispatch == RET_OK) {
@@ -71,70 +71,70 @@ int logosdelivery_stop_node(void* /*ctx*/, logosdelivery_callback cb, void* user
     return dispatch;
 }
 
-int logosdelivery_send(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*msg*/) {
+int logosdelivery_send(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*msg*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_send");
     invokeOk("logosdelivery_send", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_subscribe(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*topic*/) {
+int logosdelivery_subscribe(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*topic*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_subscribe");
     invokeOk("logosdelivery_subscribe", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_unsubscribe(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*topic*/) {
+int logosdelivery_unsubscribe(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*topic*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_unsubscribe");
     invokeOk("logosdelivery_unsubscribe", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_channel_create(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+int logosdelivery_channel_create(void* /*ctx*/, FFICallBack cb, void* userData,
                                  const char* /*channelId*/, const char* /*contentTopic*/, const char* /*senderId*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_channel_create");
     invokeOk("logosdelivery_channel_create", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_channel_exists(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*channelId*/) {
+int logosdelivery_channel_exists(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*channelId*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_channel_exists");
     invokeOk("logosdelivery_channel_exists", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_channel_send(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+int logosdelivery_channel_send(void* /*ctx*/, FFICallBack cb, void* userData,
                                const char* /*channelId*/, const char* /*msg*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_channel_send");
     invokeOk("logosdelivery_channel_send", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_channel_close(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*channelId*/) {
+int logosdelivery_channel_close(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*channelId*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_channel_close");
     invokeOk("logosdelivery_channel_close", cb, userData);
     return RET_OK;
 }
 
-int waku_store_query(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+int waku_store_query(void* /*ctx*/, FFICallBack cb, void* userData,
                      const char* /*jsonQuery*/, const char* /*peerAddr*/, int /*timeoutMs*/) {
     LOGOS_CMOCK_RECORD("waku_store_query");
     invokeOk("waku_store_query", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_get_node_info(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*attributeName*/) {
+int logosdelivery_get_node_info(void* /*ctx*/, FFICallBack cb, void* userData, const char* /*attributeName*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_node_info");
     invokeOk("logosdelivery_get_node_info", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_get_available_node_info_ids(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
+int logosdelivery_get_available_node_info_ids(void* /*ctx*/, FFICallBack cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_available_node_info_ids");
     invokeOk("logosdelivery_get_available_node_info_ids", cb, userData);
     return RET_OK;
 }
 
-int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
+int logosdelivery_get_available_configs(void* /*ctx*/, FFICallBack cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_available_configs");
     invokeOk("logosdelivery_get_available_configs", cb, userData);
     return RET_OK;
@@ -161,7 +161,7 @@ int logosdelivery_set_eligibility_provider(void* /*ctx*/, EligibilityProviderCb 
 
 int logosdelivery_store_query(
     void* /*ctx*/,
-    logosdelivery_callback cb,
+    FFICallBack cb,
     void* userData,
     const char* /*queryJson*/,
     const char* /*providerAddr*/)
